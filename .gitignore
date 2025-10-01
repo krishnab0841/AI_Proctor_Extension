@@ -20,6 +20,24 @@ wheels/
 .installed.cfg
 *.egg
 
+# Model files
+*.pt
+*.pth
+*.h5
+*.pkl
+*.joblib
+*.onnx
+*.tflite
+*.pb
+*.pbtxt
+*.weights
+*.cfg
+*.names
+
+# YOLO specific
+runs/
+*.pt
+
 # Virtual Environment
 venv/
 env/
