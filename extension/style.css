@@ -1,0 +1,136 @@
+#ai-proctor-widget {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    width: 320px;
+    max-height: 250px; /* Reduced height for a more compact look */
+    background-color: #1A202C;
+    border: 1px solid #4A5568;
+    border-radius: 12px;
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.2), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+    z-index: 9999;
+    color: #E2E8F0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    transition: all 0.3s ease-in-out;
+}
+
+#proctor-header {
+    background-color: #2D3748;
+    padding: 10px 15px;
+    cursor: grab;
+    user-select: none;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid #4A5568;
+}
+
+#proctor-header h3 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: #A0AEC0;
+}
+
+#proctor-status-indicator {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background-color: #E53E3E; /* Default to red (off) */
+    transition: background-color 0.3s ease;
+}
+
+#proctor-body {
+    padding: 15px;
+    display: flex;
+    flex-direction: column;
+    flex-grow: 1;
+    overflow: hidden;
+}
+
+#proctor-alert-display {
+    flex-grow: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 15px;
+}
+
+.log-placeholder {
+    color: #718096;
+    font-style: italic;
+    text-align: center;
+}
+
+.alert-item {
+    width: 100%;
+    background-color: #2D3748;
+    padding: 10px;
+    border-radius: 8px;
+    border-left: 4px solid #4A5568;
+}
+
+.alert-item strong {
+    display: block;
+    margin-bottom: 4px;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.alert-item p {
+    margin: 0;
+    font-size: 13px;
+    color: #A0AEC0;
+    line-height: 1.4;
+}
+
+/* Alert Severity Colors */
+.alert-item.info { border-left-color: #48BB78; } 
+.alert-item.info strong { color: #48BB78; }
+
+.alert-item.low { border-left-color: #F6E05E; } 
+.alert-item.low strong { color: #F6E05E; }
+
+.alert-item.medium { border-left-color: #ED8936; }
+.alert-item.medium strong { color: #ED8936; }
+
+.alert-item.high { border-left-color: #F56565; }
+.alert-item.high strong { color: #F56565; }
+
+#proctor-start-btn {
+    width: 100%;
+    padding: 10px;
+    background-color: #38A169;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 600;
+    transition: background-color 0.2s ease-in-out;
+}
+
+#proctor-start-btn:hover {
+    background-color: #2F855A;
+}
+
+#proctor-start-btn.stop {
+    background-color: #E53E3E;
+}
+
+#proctor-start-btn.stop:hover {
+    background-color: #C53030;
+}
+
+#proctor-start-btn:disabled {
+    background-color: #4A5568;
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+
+#proctor-start-btn:disabled:hover {
+    background-color: #4A5568;
+}
