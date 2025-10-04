@@ -7,11 +7,12 @@
     "storage"
   ],
   "host_permissions": [
-    "https://meet.google.com/*"
+    "https://meet.google.com/*",
+    "https://*.zoom.us/*"
   ],
   "web_accessible_resources": [{
     "resources": ["*.css", "icons/*.png"],
-    "matches": ["https://meet.google.com/*"]
+    "matches": ["https://meet.google.com/*", "https://*.zoom.us/*"]
   }],
   "icons": {
     "16": "icons/icon16.png",
@@ -21,8 +22,9 @@
   "action": {
     "default_popup": "popup.html"
   },
+  "options_page": "settings.html",
   "content_scripts": [{
-    "matches": ["https://meet.google.com/*"],
+    "matches": ["https://meet.google.com/*", "https://*.zoom.us/*"],
     "js": ["socket.io.min.js", "content.js"],
     "css": ["style.css"],
     "all_frames": true

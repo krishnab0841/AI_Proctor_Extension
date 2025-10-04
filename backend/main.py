@@ -14,6 +14,13 @@ from transformers import GitForCausalLM, GitProcessor
 
 # Import configuration from config.py
 from config import settings
+# Import enhanced detection modules
+from enhanced_detection import (
+    BehaviorAnalyzer, 
+    EyeGazeTracker, 
+    ObjectDetectionAnalyzer,
+    get_alert_severity
+)
 
 # --- Logging Setup ---
 # Provides continuous feedback in the terminal where the script is running
@@ -114,17 +121,27 @@ def get_local_image_analysis(frame_rgb, sid: str, trigger_reason: str):
         return "Local analysis failed."
 
 def run_yolo_detection(frame, sid: str):
-    if yolo_model is None: return []
+    if yolo_model is None: return [], []
     try:
         results = yolo_model(frame)
-        labels = results.pandas().xyxy[0]
-        detected_objects = labels['name'].unique().tolist()
+        
+        # Use enhanced detection with confidence filtering
+        detections = ObjectDetectionAnalyzer.filter_detections(
+            results, 
+            confidence_threshold=settings.YOLO_CONFIDENCE_THRESHOLD
+        )
+        
+        detected_objects = [d['name'] for d in detections]
+        
         if detected_objects:
             logger.info(f"[{sid}] YOLO detected: {', '.join(detected_objects)}")
-        return detected_objects
+            for d in detections:
+                logger.info(f"[{sid}]   - {d['name']}: {d['confidence']:.2f} confidence")
+        
+        return detected_objects, detections
     except Exception as e:
         logger.error(f"[{sid}] Error during YOLO detection: {e}")
-        return []
+        return [], []
 
 # --- Socket.IO Event Handlers ---
 @sio.event
@@ -137,14 +154,22 @@ async def connect(sid, environ):
             'gaze_off_screen_start': 0,
             'face_not_detected_start': 0,
             'frame_count': 0,
-            'error_count': 0
+            'error_count': 0,
+            'behavior_analyzer': BehaviorAnalyzer(
+                history_size=settings.ALERT_HISTORY_SIZE,
+                time_window=settings.BEHAVIOR_ANALYSIS_WINDOW
+            ) if settings.ENABLE_BEHAVIOR_ANALYSIS else None,
+            'last_suspicion_score': 0,
+            'multiple_faces_warned': False
         }
         await sio.emit('proctoring_alert', {
             'alert': '🟢 System Connected',
-            'description': 'AI proctor is ready.',
+            'description': 'AI proctor is ready with enhanced detection.',
             'models_loaded': {
                 'captioning': captioning_model is not None,
-                'yolo': yolo_model is not None
+                'yolo': yolo_model is not None,
+                'behavior_analysis': settings.ENABLE_BEHAVIOR_ANALYSIS,
+                'eye_tracking': settings.ENABLE_EYE_TRACKING
             }
         }, to=sid)
     except Exception as e:
@@ -189,11 +214,32 @@ async def handle_video_frame(sid, data):
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         img_h, img_w, _ = frame.shape
         suspicion_trigger = None
+        event_type = None
         results = face_mesh.process(frame_rgb)
+
+        # Check for multiple faces if enabled
+        if settings.ENABLE_MULTIPLE_FACE_DETECTION and results.multi_face_landmarks:
+            if len(results.multi_face_landmarks) > 1 and not state['multiple_faces_warned']:
+                state['multiple_faces_warned'] = True
+                await sio.emit('proctoring_alert', {
+                    'alert': '🔴 ALERT: Multiple Faces Detected',
+                    'description': f'Detected {len(results.multi_face_landmarks)} people in the frame.',
+                    'suspicion_score': 85
+                }, to=sid)
+                if state['behavior_analyzer']:
+                    state['behavior_analyzer'].add_event('multiple_faces', 'urgent', current_time)
 
         if results.multi_face_landmarks:
             state['face_not_detected_start'] = 0
             face_landmarks = results.multi_face_landmarks[0].landmark
+            
+            # Enhanced eye gaze tracking
+            if settings.ENABLE_EYE_TRACKING:
+                eye_gaze = EyeGazeTracker.analyze_eye_gaze(face_landmarks, img_w, img_h)
+                if eye_gaze.get('eyes_closed'):
+                    logger.info(f"[{sid}] Eyes closed detected")
+                if eye_gaze.get('looking_away'):
+                    logger.info(f"[{sid}] Eye gaze indicates looking away")
             
             nose_tip = face_landmarks[1]
             chin = face_landmarks[199]
@@ -206,16 +252,19 @@ async def handle_video_frame(sid, data):
                 if state['gaze_off_screen_start'] == 0: state['gaze_off_screen_start'] = current_time
                 elif current_time - state['gaze_off_screen_start'] > settings.GAZE_ALERT_DELAY:
                     suspicion_trigger = f"Candidate looking {'left' if yaw < 0 else 'right'}"
+                    event_type = 'looking_left' if yaw < 0 else 'looking_right'
             elif pitch * img_h > settings.HEAD_PITCH_THRESHOLD:
                 if state['gaze_off_screen_start'] == 0: state['gaze_off_screen_start'] = current_time
                 elif current_time - state['gaze_off_screen_start'] > settings.GAZE_ALERT_DELAY:
                     suspicion_trigger = "Candidate looking down"
+                    event_type = 'looking_down'
             else:
                 state['gaze_off_screen_start'] = 0
         else:
             if state['face_not_detected_start'] == 0: state['face_not_detected_start'] = current_time
             elif current_time - state['face_not_detected_start'] > settings.FACE_MISSING_ALERT_DELAY:
                 suspicion_trigger = "Candidate's face is not visible"
+                event_type = 'face_missing'
 
         if suspicion_trigger and (current_time - state['last_yolo_call'] > settings.YOLO_COOLDOWN):
             state['last_yolo_call'] = current_time
@@ -227,20 +276,59 @@ async def handle_video_frame(sid, data):
             }
             alert_title, alert_desc = alert_map.get(suspicion_trigger, ("Alert", "Suspicious behavior detected."))
             
-            detected_objects = run_yolo_detection(frame_rgb, sid)
+            # Enhanced YOLO detection with confidence filtering
+            detected_objects, detections = run_yolo_detection(frame_rgb, sid)
             high_risk_objects = {'cell phone', 'book', 'person'}
             detected_risk_objects = set(detected_objects) & high_risk_objects
+
+            # Record event in behavior analyzer
+            if state['behavior_analyzer'] and event_type:
+                severity = get_alert_severity(event_type, len(detected_risk_objects) > 0)
+                state['behavior_analyzer'].add_event(event_type, severity, current_time)
+
+            # Analyze object context
+            object_context = ObjectDetectionAnalyzer.analyze_object_context(detections) if detections else None
 
             if detected_risk_objects:
                 if current_time - state['last_analysis_call'] > settings.LOCAL_ANALYSIS_COOLDOWN:
                     state['last_analysis_call'] = current_time
                     detected_str = ", ".join(detected_risk_objects)
                     analysis = get_local_image_analysis(frame_rgb, sid, f"{suspicion_trigger} with {detected_str} detected.")
-                    alert = {"alert": f"🔴 URGENT: {detected_str.title()} Detected", "description": analysis}
+                    
+                    alert = {
+                        "alert": f"🔴 URGENT: {detected_str.title()} Detected",
+                        "description": analysis
+                    }
+                    
+                    # Add object confidence info
+                    if object_context and object_context.get('detected_risks'):
+                        risk_details = ", ".join([
+                            f"{r['object']} ({r['confidence']:.0%})"
+                            for r in object_context['detected_risks']
+                        ])
+                        alert['description'] += f" | Confidence: {risk_details}"
+                    
                     await sio.emit('proctoring_alert', alert, to=sid)
             else:
                 alert = {"alert": alert_title, "description": alert_desc}
                 await sio.emit('proctoring_alert', alert, to=sid)
+            
+            # Calculate and send suspicion score if behavior analysis enabled
+            if state['behavior_analyzer'] and settings.ENABLE_BEHAVIOR_ANALYSIS:
+                suspicion_score, reasons = state['behavior_analyzer'].calculate_suspicion_score()
+                
+                # Send high suspicion score alert
+                if suspicion_score >= settings.SUSPICION_SCORE_THRESHOLD and suspicion_score > state['last_suspicion_score']:
+                    state['last_suspicion_score'] = suspicion_score
+                    pattern_summary = state['behavior_analyzer'].get_pattern_summary()
+                    
+                    await sio.emit('proctoring_alert', {
+                        'alert': f'⚠️ HIGH SUSPICION SCORE: {suspicion_score}/100',
+                        'description': f"Behavioral patterns detected: {'; '.join(reasons)}",
+                        'suspicion_score': suspicion_score,
+                        'pattern_summary': pattern_summary
+                    }, to=sid)
+                    logger.warning(f"[{sid}] High suspicion score: {suspicion_score} - {reasons}")
 
     except base64.binascii.Error as e:
         logger.error(f"[{sid}] Base64 decode error: {e}")
@@ -281,13 +369,13 @@ async def error(sid, data):
 # --- Main Entry Point ---
 if __name__ == '__main__':
     logger.info("--- AI Proctoring System ---")
-    logger.info(f"Backend API & WebSocket running at: http://{settings.HOST}:{settings.PORT}")
+    logger.info(f"Backend API & WebSocket running at: http://{settings.BACKEND_HOST}:{settings.BACKEND_PORT}")
     logger.info("Run the browser extension in a meeting to begin.")
     logger.info("-----------------------------")
     
     uvicorn.run(
         app,
-        host=settings.HOST,
-        port=settings.PORT,
+        host=settings.BACKEND_HOST,
+        port=settings.BACKEND_PORT,
         log_level="info"
     )

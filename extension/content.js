@@ -18,9 +18,9 @@
     const canvasElement = document.createElement('canvas');
     const ctx = canvasElement.getContext('2d');
 
-    // Configuration
-    const BACKEND_URL = 'http://localhost:5002';
-    const FRAME_CAPTURE_INTERVAL = 1000; // ms between frames
+    // Configuration (loaded from Chrome storage)
+    let BACKEND_URL = 'http://localhost:5002';
+    let FRAME_CAPTURE_INTERVAL = 1000; // ms between frames
 
     // --- Main UI Creation ---
     function createProctorUI() {
@@ -268,11 +268,13 @@
         if (state === 'start') {
             startBtn.textContent = "Stop Monitoring";
             startBtn.classList.add('stop');
-            statusIndicator.style.backgroundColor = '#48BB78';
+            statusIndicator.style.backgroundColor = '#22c55e';
+            statusIndicator.style.animation = 'pulse-green 2s infinite';
         } else {
             startBtn.textContent = "Start Monitoring";
             startBtn.classList.remove('stop');
-            statusIndicator.style.backgroundColor = '#E53E3E';
+            statusIndicator.style.backgroundColor = '#ef4444';
+            statusIndicator.style.animation = 'pulse-red 2s infinite';
         }
     }
 
@@ -336,21 +338,41 @@
         }
     };
 
+    // --- Load Configuration from Chrome Storage ---
+    function loadConfiguration(callback) {
+        const defaults = {
+            backendUrl: 'http://localhost:5002',
+            frameInterval: 1000,
+            maxReconnectAttempts: 5
+        };
+        
+        chrome.storage.sync.get(defaults, (config) => {
+            BACKEND_URL = config.backendUrl;
+            FRAME_CAPTURE_INTERVAL = config.frameInterval;
+            maxReconnectAttempts = config.maxReconnectAttempts;
+            console.log('[AI Proctor] Loaded configuration:', config);
+            if (callback) callback();
+        });
+    }
+
     // --- Initialize ---
     try {
-        // Use a robust polling mechanism to initialize the extension
-        const initInterval = setInterval(() => {
-        // Wait for a video element to be present, a reliable sign the meeting is active.
-        const meetUIReady = document.querySelector('video');
-        
-        if (meetUIReady) {
-            console.log('[AI Proctor] Google Meet UI is ready. Initializing...');
-            clearInterval(initInterval);
-            // Only create the UI and initialize once the video is ready
-            createProctorUI();
-            initExtension();
-        }
-    }, 1000); // Check every second
+        // Load configuration first, then initialize
+        loadConfiguration(() => {
+            // Use a robust polling mechanism to initialize the extension
+            const initInterval = setInterval(() => {
+                // Wait for a video element to be present, a reliable sign the meeting is active.
+                const meetUIReady = document.querySelector('video');
+                
+                if (meetUIReady) {
+                    console.log('[AI Proctor] Meeting UI is ready. Initializing...');
+                    clearInterval(initInterval);
+                    // Only create the UI and initialize once the video is ready
+                    createProctorUI();
+                    initExtension();
+                }
+            }, 1000); // Check every second
+        });
         console.log('[AI Proctor] Extension initialized successfully');
     } catch (e) {
         console.error('[AI Proctor] Failed to initialize:', e);

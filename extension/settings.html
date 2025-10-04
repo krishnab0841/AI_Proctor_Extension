@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>AI Proctor Settings</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%);
+            color: #f1f5f9;
+            padding: 40px 20px;
+            min-height: 100vh;
+            position: relative;
+            overflow-x: hidden;
+        }
+        
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: 
+                radial-gradient(circle at 20% 50%, rgba(99, 102, 241, 0.1) 0%, transparent 50%),
+                radial-gradient(circle at 80% 80%, rgba(168, 85, 247, 0.1) 0%, transparent 50%);
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .container {
+            max-width: 650px;
+            margin: 0 auto;
+            background: linear-gradient(145deg, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0.8) 100%);
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.05);
+            overflow: hidden;
+            backdrop-filter: blur(20px);
+            position: relative;
+            z-index: 1;
+        }
+
+        .header {
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.1) 0%, rgba(168, 85, 247, 0.05) 100%);
+            padding: 40px 30px;
+            text-align: center;
+            border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+        }
+
+        .header h1 {
+            background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            font-size: 32px;
+            font-weight: 700;
+            margin-bottom: 12px;
+            letter-spacing: -0.02em;
+        }
+
+        .header p {
+            color: #94a3b8;
+            font-size: 15px;
+        }
+
+        .content {
+            padding: 30px;
+        }
+
+        .setting-group {
+            margin-bottom: 30px;
+        }
+
+        .setting-group label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 10px;
+            color: #E2E8F0;
+            font-size: 14px;
+        }
+
+        .setting-group input[type="text"],
+        .setting-group input[type="number"] {
+            width: 100%;
+            padding: 12px 15px;
+            background-color: #1A202C;
+            border: 1px solid #4A5568;
+            border-radius: 8px;
+            color: #E2E8F0;
+            font-size: 14px;
+            transition: border-color 0.2s;
+        }
+
+        .setting-group input:focus {
+            outline: none;
+            border-color: #4FD1C5;
+        }
+
+        .setting-group small {
+            display: block;
+            margin-top: 8px;
+            color: #A0AEC0;
+            font-size: 12px;
+        }
+
+        .actions {
+            display: flex;
+            gap: 15px;
+            margin-top: 30px;
+        }
+
+        .btn {
+            flex: 1;
+            padding: 12px 20px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background-color: #38A169;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background-color: #2F855A;
+        }
+
+        .btn-secondary {
+            background-color: #4A5568;
+            color: #E2E8F0;
+        }
+
+        .btn-secondary:hover {
+            background-color: #718096;
+        }
+
+        .status-message {
+            padding: 12px 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-size: 14px;
+            display: none;
+        }
+
+        .status-message.success {
+            background-color: rgba(72, 187, 120, 0.2);
+            border: 1px solid #48BB78;
+            color: #48BB78;
+        }
+
+        .status-message.error {
+            background-color: rgba(245, 101, 101, 0.2);
+            border: 1px solid #F56565;
+            color: #F56565;
+        }
+
+        .divider {
+            height: 1px;
+            background-color: #4A5568;
+            margin: 30px 0;
+        }
+
+        .info-box {
+            background-color: rgba(79, 209, 197, 0.1);
+            border-left: 4px solid #4FD1C5;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 20px;
+        }
+
+        .info-box h3 {
+            color: #4FD1C5;
+            font-size: 14px;
+            margin-bottom: 8px;
+        }
+
+        .info-box p {
+            color: #A0AEC0;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>⚙️ AI Proctor Settings</h1>
+            <p>Configure your proctoring backend connection</p>
+        </div>
+
+        <div class="content">
+            <div id="statusMessage" class="status-message"></div>
+
+            <div class="setting-group">
+                <label for="backendUrl">Backend Server URL</label>
+                <input 
+                    type="text" 
+                    id="backendUrl" 
+                    placeholder="http://localhost:5002"
+                    value="http://localhost:5002"
+                >
+                <small>The URL where your AI Proctor backend server is running</small>
+            </div>
+
+            <div class="divider"></div>
+
+            <div class="setting-group">
+                <label for="frameInterval">Frame Capture Interval (ms)</label>
+                <input 
+                    type="number" 
+                    id="frameInterval" 
+                    min="500" 
+                    max="5000" 
+                    step="100"
+                    value="1000"
+                >
+                <small>Time between video frame captures (1000ms = 1 second)</small>
+            </div>
+
+            <div class="setting-group">
+                <label for="maxReconnectAttempts">Max Reconnection Attempts</label>
+                <input 
+                    type="number" 
+                    id="maxReconnectAttempts" 
+                    min="1" 
+                    max="10"
+                    value="5"
+                >
+                <small>Number of times to retry connection before giving up</small>
+            </div>
+
+            <div class="actions">
+                <button class="btn btn-primary" id="saveBtn">Save Settings</button>
+                <button class="btn btn-secondary" id="resetBtn">Reset to Defaults</button>
+            </div>
+
+            <div class="info-box">
+                <h3>💡 Need Help?</h3>
+                <p>
+                    Make sure your backend server is running before starting monitoring. 
+                    Default port is 5002. If you changed the port in your backend configuration, 
+                    update the URL above accordingly.
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <script src="settings.js"></script>
+</body>
+</html>

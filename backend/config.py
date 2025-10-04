@@ -6,8 +6,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
     # --- Server Configuration ---
-    HOST: str = "0.0.0.0"
-    PORT: int = 5002
+    BACKEND_HOST: str = "0.0.0.0"
+    BACKEND_PORT: int = 5002
     # CORS Origins: Restrict to specific origins in production for security
     # Development: Use ["*"] for testing
     # Production: Use specific origins like ["http://localhost:3000", "chrome-extension://*"]
@@ -15,7 +15,10 @@ class Settings(BaseSettings):
         "http://localhost:3000",
         "http://localhost:5173",
         "chrome-extension://*",
-        "moz-extension://*"
+        "moz-extension://*",
+        "https://meet.google.com",
+        "https://zoom.us",
+        "https://*.zoom.us"
     ]
     # Set to True to allow all origins (development only)
     ALLOW_ALL_ORIGINS: bool = False
@@ -51,6 +54,22 @@ class Settings(BaseSettings):
     # Cooldown periods (in seconds) to prevent alert spam.
     YOLO_COOLDOWN: float = 10.0
     LOCAL_ANALYSIS_COOLDOWN: float = 15.0
+    
+    # --- Enhanced Detection Settings ---
+    # Enable iris/eye tracking for more precise gaze detection
+    ENABLE_EYE_TRACKING: bool = True
+    # Minimum confidence for YOLO detections (0.0 to 1.0)
+    YOLO_CONFIDENCE_THRESHOLD: float = 0.5
+    # Enable behavioral pattern analysis
+    ENABLE_BEHAVIOR_ANALYSIS: bool = True
+    # Suspicion score threshold to trigger high-priority alert (0-100)
+    SUSPICION_SCORE_THRESHOLD: int = 70
+    # Track alert history for pattern detection
+    ALERT_HISTORY_SIZE: int = 50
+    # Time window (seconds) for behavioral pattern analysis
+    BEHAVIOR_ANALYSIS_WINDOW: float = 60.0
+    # Enable multiple face detection warning
+    ENABLE_MULTIPLE_FACE_DETECTION: bool = True
 
 # Initialize settings
 settings = Settings()

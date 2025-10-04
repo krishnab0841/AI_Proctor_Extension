@@ -4,7 +4,21 @@ A sophisticated, real-time proctoring tool designed as a browser extension for *
 
 ![AI Proctor Demo](https://via.placeholder.com/800x400.png?text=AI+Proctor+Demo)
 
-## Core Features
+## 🔄 Workflow
+
+```mermaid
+flowchart TD
+    A[Start Monitoring] --> B[Capture Video Frame]
+    B --> C[Detect Faces & Objects]
+    C --> D{Analyze Behavior}
+    D -->|Suspicious?| E[Generate Alert]
+    D -->|Normal| B
+    E --> F[Update Suspicion Score]
+    F --> G[Display Alert in Widget]
+    G --> B
+```
+
+## ✨ Core Features
 
 ### Interviewer-Focused
 
