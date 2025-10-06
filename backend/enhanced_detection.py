@@ -86,9 +86,10 @@ class BehaviorAnalyzer:
                 recent_events[i+1]['timestamp'] - recent_events[i]['timestamp']
                 for i in range(len(recent_events) - 1)
             ]
-            avg_interval = np.mean(time_diffs) if time_diffs else 0
+            # Count how many events occurred in quick succession (e.g., < 5 seconds apart)
+            rapid_succession_count = sum(1 for diff in time_diffs if diff < 5.0)
             
-            if avg_interval < 5.0 and len(recent_events) >= 5:  # Events less than 5 seconds apart
+            if rapid_succession_count >= 3: # If at least 3 events happened quickly
                 score += 10
                 reasons.append("Rapid suspicious activity detected")
         
@@ -218,6 +219,8 @@ class ObjectDetectionAnalyzer:
             'book': 8,
             'person': 9,
             'laptop': 5,
+            'tv': 8,
+            'remote': 6,
             'keyboard': 3,
             'mouse': 2
         }

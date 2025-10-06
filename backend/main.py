@@ -10,7 +10,7 @@ import logging
 import time
 from fastapi import FastAPI
 from PIL import Image
-from transformers import GitForCausalLM, GitProcessor
+from transformers import BlipForConditionalGeneration, BlipProcessor
 
 # Import configuration from config.py
 from config import settings
@@ -41,8 +41,8 @@ captioning_processor = None
 captioning_model = None
 try:
     logger.info(f"Loading image captioning model: '{settings.LOCAL_CAPTION_MODEL}'")
-    captioning_processor = GitProcessor.from_pretrained(settings.LOCAL_CAPTION_MODEL, use_fast=True)
-    captioning_model = GitForCausalLM.from_pretrained(settings.LOCAL_CAPTION_MODEL).to(device)
+    captioning_processor = BlipProcessor.from_pretrained(settings.LOCAL_CAPTION_MODEL)
+    captioning_model = BlipForConditionalGeneration.from_pretrained(settings.LOCAL_CAPTION_MODEL).to(device)
     logger.info("Image captioning model loaded successfully.")
 except Exception as e:
     logger.error(f"Could not load captioning model: {e}. Contextual analysis will be disabled.")
@@ -94,6 +94,8 @@ cors_origins = "*" if settings.ALLOW_ALL_ORIGINS else settings.CORS_ORIGINS
 sio = socketio.AsyncServer(
     async_mode='asgi',
     cors_allowed_origins=cors_origins,
+    ping_timeout=30,  # Allow 30 seconds for ping-pong, up from default 5s
+    ping_interval=10, # Send a ping every 10 seconds, down from default 25s
     logger=True,
     engineio_logger=False
 )
@@ -111,7 +113,9 @@ def get_local_image_analysis(frame_rgb, sid: str, trigger_reason: str):
     try:
         logger.info(f"[{sid}] Getting local analysis for: {trigger_reason}")
         image = Image.fromarray(frame_rgb)
-        pixel_values = captioning_processor(images=image, return_tensors="pt").pixel_values.to(device)
+        inputs = captioning_processor(images=image, return_tensors="pt").to(device)
+        pixel_values = inputs.pixel_values
+
         generated_ids = captioning_model.generate(pixel_values=pixel_values, max_length=50)
         caption = captioning_processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
         logger.info(f"[{sid}] Generated caption: '{caption}'")
@@ -145,10 +149,16 @@ def run_yolo_detection(frame, sid: str):
 
 # --- Socket.IO Event Handlers ---
 @sio.event
-async def connect(sid, environ):
+async def connect(sid, environ, auth):
     try:
-        logger.info(f"Interviewer client connected: {sid}")
+        # Authenticate the client
+        if not auth or auth.get('token') != settings.SECRET_KEY:
+            logger.warning(f"Authentication failed for {sid}. Connection rejected.")
+            return False  # Reject the connection
+
+        logger.info(f"Interviewer client connected and authenticated: {sid}")
         user_states[sid] = {
+            'start_time': time.time(),
             'last_analysis_call': 0,
             'last_yolo_call': 0,
             'gaze_off_screen_start': 0,
@@ -160,7 +170,9 @@ async def connect(sid, environ):
                 time_window=settings.BEHAVIOR_ANALYSIS_WINDOW
             ) if settings.ENABLE_BEHAVIOR_ANALYSIS else None,
             'last_suspicion_score': 0,
-            'multiple_faces_warned': False
+            'last_multiple_faces_alert_time': 0,
+            'last_360_scan_request_time': 0,
+            'has_sent_first_360_scan': False,
         }
         await sio.emit('proctoring_alert', {
             'alert': '🟢 System Connected',
@@ -206,28 +218,32 @@ async def handle_video_frame(sid, data):
             logger.warning(f"[{sid}] Failed to decode frame")
             state['error_count'] += 1
             return
-            
+
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+
         # Log processing stats periodically
         if state['frame_count'] % 100 == 0:
             logger.info(f"[{sid}] Processed {state['frame_count']} frames, {state['error_count']} errors")
-
-        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         img_h, img_w, _ = frame.shape
         suspicion_trigger = None
         event_type = None
         results = face_mesh.process(frame_rgb)
 
         # Check for multiple faces if enabled
-        if settings.ENABLE_MULTIPLE_FACE_DETECTION and results.multi_face_landmarks:
-            if len(results.multi_face_landmarks) > 1 and not state['multiple_faces_warned']:
-                state['multiple_faces_warned'] = True
+        if settings.ENABLE_MULTIPLE_FACE_DETECTION and results.multi_face_landmarks and len(results.multi_face_landmarks) > 1:
+            if current_time - state.get('last_multiple_faces_alert_time', 0) > settings.MULTIPLE_FACES_COOLDOWN:
+                state['last_multiple_faces_alert_time'] = current_time
+                num_faces = len(results.multi_face_landmarks)
                 await sio.emit('proctoring_alert', {
-                    'alert': '🔴 ALERT: Multiple Faces Detected',
-                    'description': f'Detected {len(results.multi_face_landmarks)} people in the frame.',
+                    'alert': '🔴 ALERT: Multiple People Detected',
+                    'description': f'Detected {num_faces} people in the frame. Only the candidate should be present.',
                     'suspicion_score': 85
                 }, to=sid)
-                if state['behavior_analyzer']:
+                logger.warning(f'[{sid}] Multiple faces detected: {num_faces}')
+                if state.get('behavior_analyzer'):
                     state['behavior_analyzer'].add_event('multiple_faces', 'urgent', current_time)
+                return # Stop processing this frame as it's a critical violation
 
         if results.multi_face_landmarks:
             state['face_not_detected_start'] = 0
@@ -266,7 +282,8 @@ async def handle_video_frame(sid, data):
                 suspicion_trigger = "Candidate's face is not visible"
                 event_type = 'face_missing'
 
-        if suspicion_trigger and (current_time - state['last_yolo_call'] > settings.YOLO_COOLDOWN):
+        # Always run YOLO detection periodically, regardless of suspicion trigger
+        if current_time - state['last_yolo_call'] > settings.YOLO_COOLDOWN:
             state['last_yolo_call'] = current_time
             alert_map = {
                 "Candidate looking left": ("🟠 WARNING: Off-Screen Gaze", "Candidate is looking to the left."),
@@ -274,17 +291,31 @@ async def handle_video_frame(sid, data):
                 "Candidate looking down": ("🟠 WARNING: Looking Down", "Detected downward glances."),
                 "Candidate's face is not visible": ("🟡 ATTENTION: Face Not Visible", "Candidate is not visible in the camera feed.")
             }
-            alert_title, alert_desc = alert_map.get(suspicion_trigger, ("Alert", "Suspicious behavior detected."))
+            alert_title, alert_desc = alert_map.get(suspicion_trigger, (None, None))
             
             # Enhanced YOLO detection with confidence filtering
             detected_objects, detections = run_yolo_detection(frame_rgb, sid)
-            high_risk_objects = {'cell phone', 'book', 'person'}
+            high_risk_objects = {'cell phone', 'book', 'person', 'tv', 'remote'}
             detected_risk_objects = set(detected_objects) & high_risk_objects
 
             # Record event in behavior analyzer
             if state['behavior_analyzer'] and event_type:
                 severity = get_alert_severity(event_type, len(detected_risk_objects) > 0)
                 state['behavior_analyzer'].add_event(event_type, severity, current_time)
+
+            # Count persons detected by YOLO, but only if MediaPipe didn't already detect multiple faces
+            person_count = detected_objects.count('person')
+            if person_count > 1 and settings.ENABLE_MULTIPLE_FACE_DETECTION and not (results.multi_face_landmarks and len(results.multi_face_landmarks) > 1):
+                if current_time - state.get('last_multiple_persons_alert_time', 0) > settings.MULTIPLE_FACES_COOLDOWN:
+                    state['last_multiple_persons_alert_time'] = current_time
+                    await sio.emit('proctoring_alert', {
+                        'alert': '🔴 ALERT: Multiple People Detected',
+                        'description': f'Detected {person_count} people in the frame. Only the candidate should be present.',
+                        'suspicion_score': 85
+                    }, to=sid)
+                    logger.warning(f'[{sid}] Multiple persons detected via YOLO: {person_count}')
+                    if state.get('behavior_analyzer'):
+                        state['behavior_analyzer'].add_event('multiple_persons', 'urgent', current_time)
 
             # Analyze object context
             object_context = ObjectDetectionAnalyzer.analyze_object_context(detections) if detections else None
@@ -309,7 +340,8 @@ async def handle_video_frame(sid, data):
                         alert['description'] += f" | Confidence: {risk_details}"
                     
                     await sio.emit('proctoring_alert', alert, to=sid)
-            else:
+            elif alert_title:
+                # Only send gaze/face alerts if no high-risk object was found
                 alert = {"alert": alert_title, "description": alert_desc}
                 await sio.emit('proctoring_alert', alert, to=sid)
             
@@ -330,6 +362,18 @@ async def handle_video_frame(sid, data):
                     }, to=sid)
                     logger.warning(f"[{sid}] High suspicion score: {suspicion_score} - {reasons}")
 
+            # Request a one-time 360-degree environmental scan after 5 minutes
+            if not state['has_sent_first_360_scan']:
+                # Check if 5 minutes (300 seconds) have passed since monitoring started
+                if current_time - state.get('start_time', current_time) > 300:
+                    state['has_sent_first_360_scan'] = True # Ensure this only runs once
+                    await sio.emit('proctoring_alert', {
+                        'alert': '🔵 REQUEST: 360° Environmental Scan',
+                        'description': 'Please show your surroundings by doing a 360-degree scan with your camera.',
+                        'type': 'request_360_scan'
+                    }, to=sid)
+                    logger.info(f'[{sid}] Requested one-time 5-minute 360-degree environmental scan.')
+
     except base64.binascii.Error as e:
         logger.error(f"[{sid}] Base64 decode error: {e}")
         state['error_count'] += 1
@@ -346,6 +390,31 @@ async def handle_video_frame(sid, data):
                 'alert': '⚠️ Processing Errors',
                 'description': f'Encountered {state["error_count"]} errors processing frames. Check video quality.'
             }, to=sid)
+
+@sio.on('manual_request')
+async def handle_manual_request(sid, data):
+    logger.info(f"[{sid}] Received manual request: {data}")
+    request_type = data.get('type')
+    state = user_states.get(sid)
+
+    if not state:
+        return
+
+    if request_type == 'request_360_scan':
+        state['last_360_scan_request_time'] = time.time()
+        await sio.emit('proctoring_alert', {
+            'alert': '🔵 REQUEST: 360° Environmental Scan',
+            'description': 'Proctor has manually requested a 360-degree scan of your surroundings.',
+            'type': 'request_360_scan'
+        }, to=sid)
+        logger.info(f'[{sid}] Manually triggered 360-degree environmental scan.')
+
+
+
+@sio.on('client_response')
+async def handle_client_response(sid, data):
+    """Handles client responses, like acknowledging a 360 scan."""
+    logger.info(f"[{sid}] Received client response: {data}")
 
 @sio.on('client_alert')
 async def client_side_alert(sid, data):

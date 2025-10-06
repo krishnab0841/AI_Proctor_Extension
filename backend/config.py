@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     # Set to True to allow all origins (development only)
     ALLOW_ALL_ORIGINS: bool = False
 
+    # --- Security Configuration ---
+    # A secret key to authenticate WebSocket connections. CHANGE THIS IN PRODUCTION.
+    SECRET_KEY: str = "Hk$4@Lp!9*sFv&2^gT#z"
+
     # --- AI Model Configuration ---
     # The name of the YOLOv5 model to use. 'yolov5s' is small and fast.
     YOLO_MODEL_NAME: str = 'yolov5s'
@@ -32,10 +36,11 @@ class Settings(BaseSettings):
     
     # The name of the local image captioning model from Hugging Face.
     # 'microsoft/git-base-coco' is a small and efficient model.
-    LOCAL_CAPTION_MODEL: str = "microsoft/git-base-coco"
+    LOCAL_CAPTION_MODEL: str = "Salesforce/blip-image-captioning-base"
 
     # --- MediaPipe Configuration ---
-    FACE_MESH_MAX_NUM_FACES: int = 1
+    # Set to a higher number to detect multiple people in the frame.
+    FACE_MESH_MAX_NUM_FACES: int = 5
     FACE_MESH_REFINE_LANDMARKS: bool = True
     FACE_MESH_MIN_DETECTION_CONFIDENCE: float = 0.5
     FACE_MESH_MIN_TRACKING_CONFIDENCE: float = 0.5
@@ -54,6 +59,7 @@ class Settings(BaseSettings):
     # Cooldown periods (in seconds) to prevent alert spam.
     YOLO_COOLDOWN: float = 10.0
     LOCAL_ANALYSIS_COOLDOWN: float = 15.0
+    MULTIPLE_FACES_COOLDOWN: float = 10.0
     
     # --- Enhanced Detection Settings ---
     # Enable iris/eye tracking for more precise gaze detection
@@ -70,6 +76,12 @@ class Settings(BaseSettings):
     BEHAVIOR_ANALYSIS_WINDOW: float = 60.0
     # Enable multiple face detection warning
     ENABLE_MULTIPLE_FACE_DETECTION: bool = True
+
+    # --- 360 Environmental Scan Settings ---
+    # Delay (in seconds) for the first 360-degree scan request.
+    INITIAL_360_SCAN_DELAY: int = 300  # 5 minutes
+    # Interval (in seconds) for subsequent 360-degree scan requests.
+    SUBSEQUENT_360_SCAN_INTERVAL: int = 1200  # 20 minutes
 
 # Initialize settings
 settings = Settings()
