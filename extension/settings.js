@@ -6,6 +6,7 @@
 // Default configuration
 const DEFAULT_CONFIG = {
     backendUrl: 'http://localhost:5002',
+    secretKey: 'your-super-secret-key-that-no-one-will-guess',
     frameInterval: 1000,
     maxReconnectAttempts: 5
 };
@@ -14,6 +15,7 @@ const DEFAULT_CONFIG = {
 const backendUrlInput = document.getElementById('backendUrl');
 const frameIntervalInput = document.getElementById('frameInterval');
 const maxReconnectAttemptsInput = document.getElementById('maxReconnectAttempts');
+const secretKeyInput = document.getElementById('secretKey');
 const saveBtn = document.getElementById('saveBtn');
 const resetBtn = document.getElementById('resetBtn');
 const statusMessage = document.getElementById('statusMessage');
@@ -33,6 +35,7 @@ function loadSettings() {
         backendUrlInput.value = config.backendUrl;
         frameIntervalInput.value = config.frameInterval;
         maxReconnectAttemptsInput.value = config.maxReconnectAttempts;
+        secretKeyInput.value = config.secretKey;
     });
 }
 
@@ -44,9 +47,10 @@ function saveSettings() {
     const backendUrl = backendUrlInput.value.trim();
     const frameInterval = parseInt(frameIntervalInput.value);
     const maxReconnectAttempts = parseInt(maxReconnectAttemptsInput.value);
+    const secretKey = secretKeyInput.value.trim();
 
-    if (!backendUrl) {
-        showMessage('Backend URL cannot be empty', 'error');
+    if (!backendUrl || !secretKey) {
+        showMessage('Backend URL and Secret Key cannot be empty', 'error');
         return;
     }
 
@@ -68,6 +72,7 @@ function saveSettings() {
     // Save to Chrome storage
     const config = {
         backendUrl,
+        secretKey,
         frameInterval,
         maxReconnectAttempts
     };

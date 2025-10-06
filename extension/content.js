@@ -11,6 +11,7 @@
     let socket;
     let requestFrameId = null;
     let targetVideoElement = null;
+    let isSelectingCandidate = false;
     let reconnectAttempts = 0;
     let maxReconnectAttempts = 5;
     let frameErrorCount = 0;
@@ -19,8 +20,8 @@
     const ctx = canvasElement.getContext('2d');
 
     // Configuration (loaded from Chrome storage)
-    let BACKEND_URL = 'http://localhost:5002';
-    let FRAME_CAPTURE_INTERVAL = 1000; // ms between frames
+    let BACKEND_URL = 'http://localhost:5002'; // Default value, will be overwritten by stored settings
+    let FRAME_CAPTURE_INTERVAL = 500; // ms between frames
 
     // --- Main UI Creation ---
     function createProctorUI() {
@@ -35,7 +36,13 @@
                 <div id="proctor-alert-display">
                     <span class="log-placeholder">Loading...</span>
                 </div>
-                <button id="proctor-start-btn" disabled>Start Monitoring</button>
+                <div id="proctor-controls">
+                    <button id="proctor-select-btn">Select Candidate</button>
+                    <button id="proctor-start-btn" disabled>Start Monitoring</button>
+                </div>
+                <div id="proctor-manual-controls" style="display: none;">
+                    <button id="proctor-clear-btn" class="proctor-btn secondary">Clear Alerts</button>
+                </div>
             </div>
         `;
         document.body.appendChild(widget);
@@ -53,19 +60,59 @@
     // --- UI Update and Alert Handling ---
     function displayAlert(alertData) {
         const alertDisplay = document.getElementById('proctor-alert-display');
-        if (!alertDisplay) return;
+        if (!alertDisplay) {
+            console.log('[AI Proctor] Alert suppressed: UI not ready.', alertData);
+            return;
+        }
+
+        // Remove placeholder if it exists
+        const placeholder = alertDisplay.querySelector('.log-placeholder');
+        if (placeholder) {
+            alertDisplay.innerHTML = ''; // Clear the "Loading..." text
+        }
 
         let severity = 'info';
         if (alertData.alert.includes('🔴')) severity = 'high';
         else if (alertData.alert.includes('🟠')) severity = 'medium';
         else if (alertData.alert.includes('🟡')) severity = 'low';
+        if (alertData.type === 'request_360_scan') severity = 'request';
 
-        alertDisplay.innerHTML = `
-            <div class="alert-item ${severity}">
+        const alertElement = document.createElement('div');
+        alertElement.className = `alert-item ${severity}`;
+        
+        const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+        alertElement.innerHTML = `
+            <div class="alert-header">
                 <strong>${alertData.alert}</strong>
-                <p>${alertData.description}</p>
+                <span class="alert-time">${time}</span>
             </div>
+            <p>${alertData.description}</p>
         `;
+
+        // Prepend the new alert and keep the list scrolled to the top
+        // Add an 'OK' button for 360 scan requests
+        if (alertData.type === 'request_360_scan') {
+            const okButton = document.createElement('button');
+            okButton.textContent = 'OK';
+            okButton.className = 'ok-button';
+            okButton.onclick = () => {
+                alertElement.remove();
+                // Optionally, send a confirmation back to the server
+                if (socket && socket.connected) {
+                    socket.emit('client_response', { alert_type: 'request_360_scan', response: 'acknowledged' });
+                }
+            };
+            alertElement.appendChild(okButton);
+        }
+
+        alertDisplay.insertBefore(alertElement, alertDisplay.firstChild);
+
+        // Optional: Limit the number of alerts shown to prevent the UI from getting too long
+        const maxAlerts = 20;
+        if (alertDisplay.children.length > maxAlerts) {
+            alertDisplay.removeChild(alertDisplay.lastChild);
+        }
     }
 
     // --- Core Monitoring Logic ---
@@ -87,11 +134,10 @@
                 return;
             }
 
-            targetVideoElement = findCandidateVideoElement();
             if (!targetVideoElement) {
                 displayAlert({
-                    alert: "🔴 Error",
-                    description: "Could not find a candidate's video. Pin the candidate or ensure their video is the largest on screen."
+                    alert: "🔴 Error: No Candidate Selected",
+                    description: "Please click 'Select Candidate' and choose a video to monitor before starting."
                 });
                 return;
             }
@@ -99,7 +145,11 @@
             reconnectAttempts = 0;
             frameErrorCount = 0;
 
+            const auth = { token: config.secretKey };
+
+
             socket = io(BACKEND_URL, {
+                auth,
                 transports: ["websocket", "polling"],
                 reconnection: true,
                 reconnectionDelay: 1000,
@@ -127,7 +177,7 @@
                 if (isMonitoring) {
                     displayAlert({
                         alert: "🔴 Connection Lost",
-                        description: `Disconnected from the backend server. Reason: ${reason}`
+                        description: `Disconnected from the backend server. Reason: ${reason}` 
                     });
                     if (reason === 'io server disconnect' || reason === 'io client disconnect') {
                         stopMonitoring();
@@ -136,11 +186,12 @@
             });
 
             socket.on('connect_error', (error) => {
+                if (!document.getElementById('ai-proctor-widget')) return;
                 console.error('[AI Proctor] Connection error:', error);
                 reconnectAttempts++;
                 displayAlert({
                     alert: "⚠️ Connection Error",
-                    description: `Failed to connect to backend (attempt ${reconnectAttempts}/${maxReconnectAttempts}). Is the server running?`
+                    description: `Failed to connect to backend (attempt ${reconnectAttempts}/${maxReconnectAttempts}). Is the server running?` 
                 });
 
                 if (reconnectAttempts >= maxReconnectAttempts) {
@@ -159,13 +210,15 @@
             console.error('[AI Proctor] Error starting monitoring:', e);
             displayAlert({
                 alert: "🔴 Initialization Error",
-                description: `Failed to start monitoring: ${e.message}`
+                description: `Failed to start monitoring: ${e.message}` 
             });
         }
     }
 
     function stopMonitoring() {
         console.log('[AI Proctor] Stopping monitoring');
+        
+        // --- Core Logic (always runs) ---
         isMonitoring = false;
         if (socket) {
             socket.disconnect();
@@ -176,11 +229,38 @@
             requestFrameId = null;
         }
         window.removeEventListener('blur', onTabSwitch);
-        targetVideoElement = null;
         reconnectAttempts = 0;
         frameErrorCount = 0;
+
+        // --- UI Logic (only runs if UI is ready) ---
+        const proctorWidget = document.getElementById('ai-proctor-widget');
+        if (!proctorWidget) {
+            // If the UI isn't ready, just ensure the core logic has stopped.
+            if (targetVideoElement) {
+                targetVideoElement.classList.remove('ai-proctor-target-video');
+            }
+            targetVideoElement = null;
+            return;
+        }
+
+        // Update UI state and show final alert
         updateUIState('stop');
         displayAlert({ alert: "⚪ Session Ended", description: "Monitoring has stopped." });
+
+        // Clear selection styling AFTER updating UI
+        if (targetVideoElement) {
+            targetVideoElement.classList.remove('ai-proctor-target-video');
+        }
+        targetVideoElement = null;
+
+        // Re-enable selection button
+        const selectBtn = document.getElementById('proctor-select-btn');
+        if (selectBtn) {
+            selectBtn.disabled = false;
+            // Correctly set button text based on whether a candidate is still selected
+            selectBtn.textContent = targetVideoElement ? 'Change Candidate' : 'Select Candidate';
+        }
+
     }
 
     // --- Frame Capture & Event Handling ---
@@ -195,15 +275,12 @@
         }
 
         if (!document.body.contains(targetVideoElement)) {
-            console.warn('[AI Proctor] Video element removed from DOM, searching for new one');
-            targetVideoElement = findCandidateVideoElement();
-            if (!targetVideoElement) {
-                displayAlert({
-                    alert: "⚠️ Video Lost",
-                    description: "Candidate video element disappeared. Monitoring paused."
-                });
-                return;
-            }
+            displayAlert({
+                alert: "🔴 ERROR: Candidate Video Lost",
+                description: "The selected candidate's video element is no longer available. Please select a new one."
+            });
+            stopMonitoring();
+            return;
         }
 
         try {
@@ -226,7 +303,7 @@
             if (frameErrorCount >= maxFrameErrors) {
                 displayAlert({
                     alert: "🔴 Capture Error",
-                    description: `Failed to capture frames ${frameErrorCount} times. Stopping monitoring.`
+                    description: `Failed to capture frames ${frameErrorCount} times. Stopping monitoring.` 
                 });
                 stopMonitoring();
             }
@@ -248,33 +325,97 @@
     }
 
     // --- Helper Functions ---
-    function findCandidateVideoElement() {
-        const videos = Array.from(document.querySelectorAll('video'));
-        if (videos.length === 0) return null;
 
-        const largeVideos = videos.filter(v => v.offsetHeight > 150 && v.readyState >= 2);
+    // --- Candidate Selection Mode (Overlay System) ---
+    function enterCandidateSelectionMode() {
+        if (isSelectingCandidate) {
+            exitCandidateSelectionMode();
+            return;
+        }
+        isSelectingCandidate = true;
+        console.log('[AI Proctor] Entering candidate selection mode.');
+        displayAlert({ alert: '🟡 Action Required', description: 'Click the \'Select\' button on the candidate\'s video.' });
 
-        if (largeVideos.length === 1) return largeVideos[0];
+        const videos = document.querySelectorAll('video');
+        if (videos.length === 0) {
+            displayAlert({ alert: '🔴 Error', description: 'No video feeds found on the page.' });
+            isSelectingCandidate = false;
+            return;
+        }
 
-        largeVideos.sort((a, b) => (b.offsetWidth * b.offsetHeight) - (a.offsetWidth * a.offsetHeight));
+        videos.forEach((video, index) => {
+            // Filter out small or hidden video elements
+            if (video.offsetHeight < 100 || video.offsetWidth < 100 || video.readyState < 2) return;
 
-        return largeVideos.length > 0 ? largeVideos[0] : null;
+            const rect = video.getBoundingClientRect();
+            const overlay = document.createElement('div');
+            overlay.className = 'ai-proctor-selection-overlay';
+            overlay.style.top = `${rect.top + window.scrollY}px`;
+            overlay.style.left = `${rect.left + window.scrollX}px`;
+            overlay.style.width = `${rect.width}px`;
+            overlay.style.height = `${rect.height}px`;
+
+            const selectBtn = document.createElement('button');
+            selectBtn.className = 'ai-proctor-overlay-btn';
+            selectBtn.textContent = 'Select Candidate';
+            selectBtn.onclick = () => selectCandidate(video);
+
+            overlay.appendChild(selectBtn);
+            document.body.appendChild(overlay);
+        });
+        
+        const selectBtn = document.getElementById('proctor-select-btn');
+        if (selectBtn) selectBtn.textContent = 'Cancel Selection';
+    }
+
+    function exitCandidateSelectionMode() {
+        document.querySelectorAll('.ai-proctor-selection-overlay').forEach(overlay => overlay.remove());
+        isSelectingCandidate = false;
+        const selectBtn = document.getElementById('proctor-select-btn');
+        if (selectBtn) selectBtn.textContent = targetVideoElement ? 'Change Candidate' : 'Select Candidate';
+    }
+
+    function selectCandidate(videoElement) {
+        // Clear previous selection if any
+        if (targetVideoElement) {
+            targetVideoElement.classList.remove('ai-proctor-target-video');
+        }
+
+        // Set new target
+        targetVideoElement = videoElement;
+        targetVideoElement.classList.add('ai-proctor-target-video');
+        console.log('[AI Proctor] Candidate video selected:', targetVideoElement);
+
+        // Update UI
+        const startBtn = document.getElementById('proctor-start-btn');
+        if (startBtn) startBtn.disabled = false;
+
+        displayAlert({ alert: '✅ Candidate Selected', description: 'Ready to start monitoring. Click the start button.' });
+
+        exitCandidateSelectionMode();
     }
 
     function updateUIState(state) {
+        const manualControls = document.getElementById('proctor-manual-controls');
         const startBtn = document.getElementById('proctor-start-btn');
         const statusIndicator = document.getElementById('proctor-status-indicator');
+
+        if (!startBtn || !statusIndicator) {
+            return; // Exit if UI elements are not ready
+        }
 
         if (state === 'start') {
             startBtn.textContent = "Stop Monitoring";
             startBtn.classList.add('stop');
             statusIndicator.style.backgroundColor = '#22c55e';
             statusIndicator.style.animation = 'pulse-green 2s infinite';
+            if (manualControls) manualControls.style.display = 'flex';
         } else {
             startBtn.textContent = "Start Monitoring";
             startBtn.classList.remove('stop');
             statusIndicator.style.backgroundColor = '#ef4444';
             statusIndicator.style.animation = 'pulse-red 2s infinite';
+            if (manualControls) manualControls.style.display = 'none';
         }
     }
 
@@ -291,8 +432,8 @@
         };
         document.onmousemove = (e) => {
             if (!isDragging) return;
-            element.style.left = `${e.clientX - offsetX}px`;
-            element.style.top = `${e.clientY - offsetY}px`;
+            element.style.left = (e.clientX - offsetX) + 'px';
+            element.style.top = (e.clientY - offsetY) + 'px';
         };
         document.onmouseup = () => {
             isDragging = false;
@@ -303,7 +444,6 @@
     // --- Error Reporting ---
     window.addEventListener('error', (event) => {
         if (event.message && event.message.includes('AI Proctor')) {
-            console.error('[AI Proctor] Global error:', event.error);
         }
     });
 
@@ -314,14 +454,26 @@
             if (typeof io !== 'undefined') {
                 console.log('[AI Proctor] Socket.IO ready');
                 const startBtn = document.getElementById('proctor-start-btn');
+                const selectBtn = document.getElementById('proctor-select-btn');
+
+                if (selectBtn) {
+                    selectBtn.addEventListener('click', enterCandidateSelectionMode);
+                }
+
                 if (startBtn) {
-                    startBtn.disabled = false;
                     startBtn.addEventListener('click', toggleMonitoring);
                 }
-                displayAlert({
-                    alert: "✅ Ready",
-                    description: "Click 'Start Monitoring' to begin."
-                });
+
+
+                const clearBtn = document.getElementById('proctor-clear-btn');
+                if (clearBtn) {
+                    clearBtn.addEventListener('click', () => {
+                        const alertDisplay = document.getElementById('proctor-alert-display');
+                        if (alertDisplay) {
+                            alertDisplay.innerHTML = '<span class="log-placeholder">Alerts cleared. Waiting for new events...</span>';
+                        }
+                    });
+                }
             } else {
                 console.error('[AI Proctor] window.io not available');
                 displayAlert({
@@ -339,41 +491,45 @@
     };
 
     // --- Load Configuration from Chrome Storage ---
+    let config = {}; // To hold the loaded configuration
+
     function loadConfiguration(callback) {
         const defaults = {
             backendUrl: 'http://localhost:5002',
             frameInterval: 1000,
-            maxReconnectAttempts: 5
+            maxReconnectAttempts: 5,
+            secretKey: '' // Ensure secretKey is part of the loaded config
         };
         
-        chrome.storage.sync.get(defaults, (config) => {
+        chrome.storage.sync.get(defaults, (loadedConfig) => {
+            config = loadedConfig; // Store loaded config globally
             BACKEND_URL = config.backendUrl;
             FRAME_CAPTURE_INTERVAL = config.frameInterval;
             maxReconnectAttempts = config.maxReconnectAttempts;
-            console.log('[AI Proctor] Loaded configuration:', config);
+            console.log('[AI Proctor] Loaded configuration:', loadedConfig);
             if (callback) callback();
         });
     }
 
     // --- Initialize ---
     try {
-        // Load configuration first, then initialize
+        // Load configuration first, then initialize the rest of the extension
         loadConfiguration(() => {
-            // Use a robust polling mechanism to initialize the extension
+            // Use a robust polling mechanism to wait for the meeting UI to be ready
             const initInterval = setInterval(() => {
-                // Wait for a video element to be present, a reliable sign the meeting is active.
                 const meetUIReady = document.querySelector('video');
                 
                 if (meetUIReady) {
                     console.log('[AI Proctor] Meeting UI is ready. Initializing...');
                     clearInterval(initInterval);
-                    // Only create the UI and initialize once the video is ready
+                    
+                    // Create the UI and set up event listeners
                     createProctorUI();
                     initExtension();
                 }
             }, 1000); // Check every second
         });
-        console.log('[AI Proctor] Extension initialized successfully');
+        console.log('[AI Proctor] Waiting for configuration and meeting UI...');
     } catch (e) {
         console.error('[AI Proctor] Failed to initialize:', e);
         alert('AI Proctor failed to initialize. Please refresh the page.');

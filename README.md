@@ -1,174 +1,151 @@
 # AI Interview Proctor
 
-A sophisticated, real-time proctoring tool designed as a browser extension for **interviewers**. It integrates directly into Google Meet and Zoom to automatically detect and flag potential cheating behaviors from the candidate's video feed.
+A sophisticated, real-time proctoring tool designed as a browser extension for **interviewers**. It integrates directly into video conferencing platforms to automatically detect and flag potential cheating behaviors from the candidate's video feed. This version features an optimized AI model for better performance and reliability.
 
-![AI Proctor Demo](https://via.placeholder.com/800x400.png?text=AI+Proctor+Demo)
+## ✨ Core Features
+
+- **Advanced AI-Powered Tracking**:
+  - **Gaze & Head Pose Detection**: Uses MediaPipe to track where the candidate is looking.
+  - **Suspicious Object Detection**: Employs a YOLOv5 model to identify high-risk objects like phones, books, and extra people.
+  - **Multiple Person Detection**: Flags if more than one person is in the frame.
+- **Intelligent Alerts & Analysis**:
+  - **Behavioral Scoring**: A real-time suspicion score (0-100) that increases based on patterns of suspicious behavior.
+  - **Contextual Analysis**: Uses a local image captioning model (Salesforce BLIP) to efficiently describe scenes when high-risk objects are detected.
+- **Proctor Controls & UX**:
+  - **Automated 360° Scan**: Automatically requests a 360-degree environmental scan 5 minutes after monitoring begins.
+  - **Interactive Alerts**: 360-scan requests include an "OK" button for candidate acknowledgment.
+  - **Clearable Alert Feed**: Proctors can clear the alert list at any time.
+- **Secure and Configurable**:
+  - **Token-Based Authentication**: Secures the WebSocket connection between the extension and the backend.
+  - **Centralized Configuration**: All key parameters for the backend and frontend are easily configurable.
+  - **Local First**: All AI models, including the lightweight BLIP model, run locally ensuring privacy and eliminating the need for external API keys or subscriptions.
+
+## 🆕 Recent Updates
+
+- **Optimized AI Model**: Switched to Salesforce's BLIP model for faster and more efficient image analysis.
+- **Simplified UI**: Removed manual scan button for a cleaner interface.
+- **Automated 360° Scan**: Now automatically triggers a single 360° scan 5 minutes after monitoring starts.
+- **Improved Stability**: Enhanced WebSocket connection handling for better reliability.
 
 ## 🔄 Workflow
 
 ```mermaid
 flowchart TD
-    A[Start Monitoring] --> B[Capture Video Frame]
-    B --> C[Detect Faces & Objects]
-    C --> D{Analyze Behavior}
-    D -->|Suspicious?| E[Generate Alert]
-    D -->|Normal| B
-    E --> F[Update Suspicion Score]
-    F --> G[Display Alert in Widget]
-    G --> B
+    subgraph Proctor's Browser (Extension)
+        A[Start Monitoring] --> B[Capture Video Frame];
+        B --> D[Send Frame to Backend];
+        I[Receive Alert] --> J[Display in Proctor Widget];
+        K[Manual Trigger] --> L[Send Request to Backend];
+    end
+
+    subgraph Local Server (Backend)
+        D --> E{Analyze Frame};
+        E -->|Object/Gaze Detection| F[Update Suspicion Score];
+        F --> G{Threshold Met?};
+        G -->|Yes| H[Emit Alert];
+        G -->|No| D;
+        H --> I;
+        L --> E;
+    end
 ```
 
-## ✨ Core Features
-
-### Interviewer-Focused
-
-- Analyzes the candidate's video stream from the interviewer's machine
-
-### Live Cheating Detection
-
-- Pipeline of AI models for real-time suspicious activity detection
-
-### Advanced Tracking
-
-- Face & Gaze Tracking (MediaPipe)
-- Enhanced Eye Gaze Detection
-- Suspicious Object Detection (YOLOv5)
-- Multiple Face Detection
-
-### Behavioral Analysis
-
-- Real-time suspicion scoring (0-100)
-- Pattern analysis over time
-- Contextual event descriptions (Microsoft GIT)
-
-### User-Friendly Alerts
-
-- Color-coded by severity
-- Discreet on-screen widget
-- No disruption to interview flow
-
-### Privacy-Focused
-
-- Fully local processing
-- No external API keys required
-- No subscription costs
-
-## Quick Start
+## 🚀 Quick Start
 
 ### Prerequisites
 
 - Python 3.9+
-- Google Chrome or Chromium-based browser
-- Node.js (for development)
+- A Chromium-based browser (Google Chrome, Brave, etc.)
 
-### Installation
+### 1. Backend Setup
 
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/krishnab0841/AI_Proctor_Extension.git
-   cd AI_Proctor_Extension
-   ```
+1.  **Navigate to the backend directory**:
+    ```bash
+    cd backend
+    ```
+2.  **Create and activate a virtual environment**:
+    ```bash
+    # For Windows
+    python -m venv venv
+    .\venv\Scripts\activate
 
-2. **Set up the backend**
-   ```bash
-   # Navigate to backend directory
-   cd backend
-   
-   # Create and activate virtual environment
-   python -m venv venv
-   .\venv\Scripts\activate  # Windows
-   # OR
-   source venv/bin/activate  # macOS/Linux
-   
-   # Install dependencies
-   pip install -r requirements.txt
-   
-   # Set up environment variables
-   copy .env.example .env
-   ```
+    # For macOS/Linux
+    python3 -m venv venv
+    source venv/bin/activate
+    ```
+3.  **Install dependencies**:
+    ```bash
+    pip install -r requirements.txt
+    ```
+4.  **Configure the backend**:
+    - Open `backend/config.py`.
+    - Change the `SECRET_KEY` to a new, random, and secure string. **This is a critical security step.**
 
-3. **Install the browser extension**
-   - Open Chrome and go to `chrome://extensions`
-   - Enable **Developer mode** (top-right toggle)
-   - Click **Load unpacked** and select the `extension` folder
+### 2. Frontend Setup
 
-## Usage
+1.  **Open your browser** and navigate to `chrome://extensions`.
+2.  **Enable Developer Mode** using the toggle in the top-right corner.
+3.  Click **"Load unpacked"** and select the `extension` folder from this project.
+4.  **Configure the extension**:
+    - Click the new AI Proctor extension icon in your toolbar and select **Options**.
+    - Enter the same `SECRET_KEY` you set in the backend configuration.
+    - Verify the other settings and click **Save**.
 
-1. **Start the backend server**
-   ```bash
-   cd backend
-   python main.py
-   ```
+### 3. Running the Application
 
-2. **Configure the extension**
-   - Right-click the extension icon → **Options**
-   - Verify backend URL (default: `http://localhost:5002`)
-   - Adjust settings as needed and click **Save**
+1.  **Start the backend server**:
+    ```bash
+    # Make sure you are in the 'backend' directory with your virtual environment active
+    python main.py
+    ```
+2.  **Join a video call** on a supported platform.
+3.  The **AI Proctor widget** will appear on the page.
+4.  Click **"Select Candidate"** and choose the video feed you want to monitor.
+5.  Click **"Start Monitoring"** to begin the analysis.
 
-3. **Start proctoring**
-   - Join a Google Meet or Zoom call
-   - The AI Proctor widget will appear automatically
-   - Click **Start Monitoring** to begin analysis
+## ⚙️ Configuration
 
-## Configuration
+### Backend (`backend/config.py`)
 
-### Backend Settings (`.env`)
-```ini
-# Server Configuration
-BACKEND_HOST=0.0.0.0
-BACKEND_PORT=5002
+All backend settings are managed in `config.py`. Key settings include:
 
-# Detection Settings
-ENABLE_EYE_TRACKING=true
-YOLO_CONFIDENCE_THRESHOLD=0.5
-ENABLE_BEHAVIOR_ANALYSIS=true
+- `SECRET_KEY`: The secret token for authenticating clients.
+- `YOLO_CONFIDENCE_THRESHOLD`: The minimum confidence for an object to be detected (0.0 to 1.0).
+- `SUSPICION_SCORE_THRESHOLD`: The score at which a high-suspicion alert is triggered.
+- `INITIAL_360_SCAN_DELAY`: The time for the first 360-scan request (in seconds).
+- `SUBSEQUENT_360_SCAN_INTERVAL`: The interval for subsequent 360-scan requests.
 
-# Alert Thresholds
-SUSPICION_SCORE_THRESHOLD=70
-GAZE_ALERT_DELAY=3.0
-HEAD_YAW_THRESHOLD=35
-```
+### Frontend (Extension Options Page)
 
-### Extension Settings
-- **Frame Capture Interval**: 1000ms (adjust based on system performance)
-- **Max Reconnection Attempts**: 5
-- **Alert History Size**: 50 events
+- **Backend Server URL**: The address of your running backend server.
+- **Secret Key**: The authentication token.
+- **Frame Capture Interval**: The time between frame captures (in milliseconds).
 
 ## Project Structure
 
 ```
 AI_Proctor_Extension/
-├── backend/                 # Python backend
-│   ├── main.py              # Main server and detection logic
+├── backend/                 # Python backend server
+│   ├── main.py              # FastAPI/Socket.IO server and main logic
 │   ├── enhanced_detection.py # Advanced detection algorithms
-│   ├── config.py            # Configuration settings
+│   ├── config.py            # All backend configuration
 │   └── requirements.txt     # Python dependencies
 │
-├── extension/               # Browser extension
-│   ├── manifest.json        # Extension configuration
-│   ├── content.js           # Content script
-│   ├── background.js        # Background service worker
-│   ├── popup/              # Extension popup UI
-│   └── assets/             # Icons and styles
+├── extension/               # Browser extension source
+│   ├── manifest.json        # Extension metadata and permissions
+│   ├── content.js           # Injects the UI and handles communication
+│   ├── settings.html        # Extension options page UI
+│   ├── settings.js          # Logic for the options page
+│   └── style.css            # Styles for the proctor widget
 │
 └── README.md               # This documentation
 ```
 
-## Privacy & Ethic
+## ⚖️ Privacy & Ethics
 
-- Always inform candidates about proctoring
-- Comply with local privacy laws
-- Use alerts as indicators, not proof
-- Manual review of flagged incidents is required
+- **Transparency is key**: Always inform candidates that a proctoring tool is in use.
+- **Compliance**: Ensure your use of this tool complies with all local privacy laws and regulations.
+- **Use as an Indicator**: This tool is designed to flag potential issues, not to make final decisions. Always use alerts as a starting point for further investigation.
 
 ## License
 
 This project is open-source and available under the MIT License.
-
-## Contributing
-
-Contributions are welcome! Please read our [Contributing Guidelines](CONTRIBUTING.md) for details.
-
-## Contact
-
-For questions or support, please open an issue on GitHub.
